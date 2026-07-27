@@ -593,11 +593,12 @@ with col2:
                                 }
                             )
                             with st.spinner("🎨 Step 2/2: Generating image via DALL-E 3..."):
+                                image_quality = "auto" if "openrouter.ai" in base_url else "standard"
                                 image_response = client.images.generate(
                                     model=openai_image_model,
                                     prompt=st.session_state.refined_prompt,
                                     size="1024x1024",
-                                    quality="standard",
+                                    quality=image_quality,
                                     n=1
                                 )
                                 img_url = image_response.data[0].url
