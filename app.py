@@ -502,7 +502,7 @@ with col2:
                                 model=openai_model,
                                 messages=openai_messages,
                                 response_format={"type": "json_object"},
-                                max_tokens=800
+                                max_tokens=500
                             )
                             
                             result_data = clean_json_response(response.choices[0].message.content)
