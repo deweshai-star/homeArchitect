@@ -34,10 +34,18 @@ st.markdown("""
         border-right: 1px solid #21262d;
     }
     
+    /* Force high contrast text colors inside the dark sidebar */
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] li {
+        color: #c9d1d9 !important;
+    }
+    
     section[data-testid="stSidebar"] .stMarkdown h1, 
     section[data-testid="stSidebar"] .stMarkdown h2, 
     section[data-testid="stSidebar"] .stMarkdown h3 {
-        color: #58a6ff;
+        color: #58a6ff !important;
         font-weight: 700;
         margin-bottom: 0px;
     }
