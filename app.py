@@ -415,7 +415,7 @@ with col2:
                             contents.append(vision_prompt)
                             
                             response = client.models.generate_content(
-                                model='gemini-3.5-flash',
+                                model='gemini-1.5-flash',
                                 contents=contents,
                                 config=types.GenerateContentConfig(
                                     response_mime_type="application/json"
