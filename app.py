@@ -266,7 +266,7 @@ if api_provider == "OpenAI / OpenRouter":
         if api_key.startswith("sk-or-"):
             default_base_url = "https://openrouter.ai/api/v1"
             default_chat_model = "openai/gpt-4o"
-            default_img_model = "black-forest-labs/flux-1-schnell"
+            default_img_model = "black-forest-labs/flux.2-flex"
             
         base_url = st.text_input(
             "API Base URL",
