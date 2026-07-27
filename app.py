@@ -134,27 +134,39 @@ if "refined_prompt" not in st.session_state:
     st.session_state.refined_prompt = None
 if "description" not in st.session_state:
     st.session_state.description = None
-if "preview_image" not in st.session_state:
-    st.session_state.preview_image = None
+if "preview_images" not in st.session_state:
+    st.session_state.preview_images = []
 
 # ----------------- HELPER FUNCTIONS -----------------
-def convert_pdf_to_image(pdf_bytes):
+def process_uploaded_file(uploaded_file):
     """
-    Converts the first page of a PDF file to a PNG Image.
-    Uses PyMuPDF (fitz) which runs entirely in python and doesn't require Poppler.
+    Parses a single uploaded file (PDF or Image) and returns a list of PIL Images.
+    Uses PyMuPDF (fitz) for PDF page extraction.
     """
-    try:
-        import fitz
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        if doc.page_count == 0:
-            raise ValueError("The uploaded PDF has no pages.")
-        page = doc.load_page(0)  # first page
-        pix = page.get_pixmap(dpi=150)
-        img_data = pix.tobytes("png")
-        return Image.open(io.BytesIO(img_data))
-    except Exception as e:
-        st.error(f"Error parsing PDF: {e}")
-        return None
+    file_bytes = uploaded_file.read()
+    file_ext = uploaded_file.name.split(".")[-1].lower()
+    
+    if file_ext == "pdf":
+        try:
+            import fitz
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            images = []
+            # Extract first page (layout page)
+            if doc.page_count > 0:
+                page = doc.load_page(0)
+                pix = page.get_pixmap(dpi=150)
+                img_data = pix.tobytes("png")
+                images.append(Image.open(io.BytesIO(img_data)))
+            return images
+        except Exception as e:
+            st.error(f"Error parsing PDF '{uploaded_file.name}': {e}")
+            return []
+    else:
+        try:
+            return [Image.open(io.BytesIO(file_bytes))]
+        except Exception as e:
+            st.error(f"Error parsing image '{uploaded_file.name}': {e}")
+            return []
 
 def get_image_bytes(image):
     """Converts a PIL Image object to raw PNG bytes."""
@@ -243,36 +255,52 @@ st.markdown("<div class='subtitle'>Transform 2D floor plans into photorealistic 
 col1, col2 = st.columns([1, 1], gap="medium")
 
 with col1:
-    st.markdown("<div class='glass-card'><div class='glass-header'>📐 Upload 2D Blueprint</div>", unsafe_allow_html=True)
+    st.markdown("<div class='glass-card'><div class='glass-header'>📐 Upload 2D Blueprints</div>", unsafe_allow_html=True)
     
-    uploaded_file = st.file_uploader(
-        "Upload a 2D floor plan drawing (PDF, PNG, JPG, JPEG)",
-        type=["pdf", "png", "jpg", "jpeg"]
+    # Enable multiple file upload only for Villa property type
+    accept_multiple = (property_type == "Villa")
+    uploader_label = (
+        "Upload multiple floor plan files (Ground floor, First floor, Elevations, etc.)"
+        if accept_multiple else
+        "Upload a 2D floor plan drawing (PDF, PNG, JPG, JPEG)"
     )
     
-    if uploaded_file is not None:
-        file_bytes = uploaded_file.read()
-        file_ext = uploaded_file.name.split(".")[-1].lower()
+    uploaded_files = st.file_uploader(
+        uploader_label,
+        type=["pdf", "png", "jpg", "jpeg"],
+        accept_multiple_files=accept_multiple
+    )
+    
+    # Process files
+    if uploaded_files:
+        files_list = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
+        parsed_images = []
+        for f in files_list:
+            parsed_images.extend(process_uploaded_file(f))
         
-        # Parse based on file type
-        if file_ext == "pdf":
-            st.info("ℹ️ PDF uploaded. Extracting first page...")
-            preview_img = convert_pdf_to_image(file_bytes)
-        else:
-            preview_img = Image.open(io.BytesIO(file_bytes))
-            
-        if preview_img is not None:
-            st.session_state.preview_image = preview_img
-            
-            # Show thumbnail of original blueprint
-            st.image(
-                st.session_state.preview_image, 
-                caption="Uploaded 2D Floor Plan Preview", 
-                use_container_width=True
-            )
+        st.session_state.preview_images = parsed_images
+        
+        # Display image previews
+        if len(st.session_state.preview_images) > 0:
+            if len(st.session_state.preview_images) == 1:
+                st.image(
+                    st.session_state.preview_images[0], 
+                    caption="Uploaded 2D Floor Plan Preview", 
+                    use_container_width=True
+                )
+            else:
+                st.info(f"📁 {len(st.session_state.preview_images)} layout drawings loaded successfully.")
+                tabs = st.tabs([f"Drawing {i+1}" for i in range(len(st.session_state.preview_images))])
+                for idx, tab in enumerate(tabs):
+                    with tab:
+                        st.image(
+                            st.session_state.preview_images[idx],
+                            caption=f"Blueprint Drawing {idx+1}",
+                            use_container_width=True
+                        )
     else:
-        st.session_state.preview_image = None
-        st.info("📂 Please upload a 2D floor plan image or PDF document to start.")
+        st.session_state.preview_images = []
+        st.info("📂 Please upload 2D floor plan files or PDF documents to start.")
         
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -286,44 +314,48 @@ with col2:
     if generate_btn:
         if not api_key:
             st.error("🔑 Please enter your API Key in the sidebar to proceed.")
-        elif st.session_state.preview_image is None:
-            st.error("📐 Please upload a 2D floor plan file first.")
+        elif not st.session_state.preview_images:
+            st.error("📐 Please upload at least one 2D floor plan file.")
         else:
-            # Prepare image bytes
-            img_bytes = get_image_bytes(st.session_state.preview_image)
-            
             # ----------------- GOOGLE GEMINI FLOW -----------------
             if api_provider == "Google Gemini":
                 try:
                     from google import genai
                     from google.genai import types
                     
-                    # Create custom steps inside spinner
-                    with st.spinner("🔍 Step 1/2: Gemini analyzing the 2D layout layout structure..."):
+                    with st.spinner(f"🔍 Step 1/2: Gemini analyzing the {len(st.session_state.preview_images)} 2D layout drawings..."):
                         client = genai.Client(api_key=api_key)
                         
                         vision_prompt = f"""
-                        You are an expert architectural designer. Analyze this 2D floor plan layout image.
+                        You are an expert architectural designer. Analyze the attached 2D floor plan layout image(s) (there are {len(st.session_state.preview_images)} drawings uploaded).
                         The user wants to visualize this property as a {property_type} with dimensions {dimensions}.
-                        Describe the architectural structure, rooms, openings, and layout details in depth.
+                        Analyze all floor plans (which may include ground floor, first floor, roof plans, elevations, etc.), synthesize them, and describe the overall architectural structure, rooms, openings, and layout details in depth.
                         Then, write a highly descriptive, detailed prompt for a high-quality 3D architectural rendering engine.
                         The prompt should guide the image generator to create a photorealistic, stunning 3D architectural visualization of the exterior/interior or a 3D cutaway floor plan of the property.
                         Include styles like: "modern architecture", "photorealistic", "luxurious design", "architectural photography", "octane render", "high-end finish".
                         Ensure the prompt focuses on making the 3D visualization look premium and clean.
                         
                         Format your response as a JSON object with two keys:
-                        "description": "Your detailed analysis of the floor plan",
+                        "description": "Your detailed analysis of the floor plan(s)",
                         "rendering_prompt": "The detailed prompt for the image generator"
                         """
                         
-                        image_part = types.Part.from_bytes(
-                            data=img_bytes,
-                            mime_type="image/png"
-                        )
+                        # Pack all preview images as Parts for Gemini Multimodal input
+                        contents = []
+                        for img in st.session_state.preview_images:
+                            img_bytes = get_image_bytes(img)
+                            contents.append(
+                                types.Part.from_bytes(
+                                    data=img_bytes,
+                                    mime_type="image/png"
+                                )
+                            )
+                        # Append the text prompt
+                        contents.append(vision_prompt)
                         
                         response = client.models.generate_content(
                             model='gemini-2.5-flash',
-                            contents=[image_part, vision_prompt],
+                            contents=contents,
                             config=types.GenerateContentConfig(
                                 response_mime_type="application/json"
                             )
@@ -356,38 +388,40 @@ with col2:
                 try:
                     import openai
                     
-                    with st.spinner("🔍 Step 1/2: GPT-4o analyzing the 2D layout layout structure..."):
+                    with st.spinner(f"🔍 Step 1/2: GPT-4o analyzing the {len(st.session_state.preview_images)} 2D layout drawings..."):
                         # Build client
                         client = openai.OpenAI(api_key=api_key, base_url=base_url)
                         
-                        base64_image = base64.b64encode(img_bytes).decode('utf-8')
-                        
                         vision_prompt = f"""
-                        You are an expert architectural designer. Analyze this 2D floor plan layout image.
+                        You are an expert architectural designer. Analyze the attached 2D floor plan layout image(s) (there are {len(st.session_state.preview_images)} drawings uploaded).
                         The user wants to visualize this property as a {property_type} with dimensions {dimensions}.
-                        Describe the architectural structure, rooms, openings, and layout details in depth.
+                        Analyze all floor plans (which may include ground floor, first floor, roof plans, elevations, etc.), synthesize them, and describe the overall architectural structure, rooms, openings, and layout details in depth.
                         Then, write a highly descriptive, detailed prompt for a high-quality 3D architectural rendering engine.
                         The prompt should guide the image generator to create a photorealistic, stunning 3D architectural visualization of the exterior/interior or a 3D cutaway floor plan of the property.
                         Include styles like: "modern architecture", "photorealistic", "luxurious design", "architectural photography", "octane render", "high-end finish".
                         Ensure the prompt focuses on making the 3D visualization look premium and clean.
                         
                         Format your response as a JSON object with two keys:
-                        "description": "Your detailed analysis of the floor plan",
+                        "description": "Your detailed analysis of the floor plan(s)",
                         "rendering_prompt": "The detailed prompt for the image generator"
                         """
+                        
+                        content_parts = [{"type": "text", "text": vision_prompt}]
+                        # Append all images as base64 blocks
+                        for img in st.session_state.preview_images:
+                            img_bytes = get_image_bytes(img)
+                            base64_image = base64.b64encode(img_bytes).decode('utf-8')
+                            content_parts.append({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}"
+                                }
+                            })
                         
                         openai_messages = [
                             {
                                 "role": "user",
-                                "content": [
-                                    {"type": "text", "text": vision_prompt},
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {
-                                            "url": f"data:image/png;base64,{base64_image}"
-                                        }
-                                    }
-                                ]
+                                "content": content_parts
                             }
                         ]
                         
