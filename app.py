@@ -182,6 +182,28 @@ def get_image_bytes(image):
     image.save(buf, format="PNG")
     return buf.getvalue()
 
+def clean_json_response(text):
+    """Strips markdown code block markers and parses JSON safely."""
+    text = text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except Exception as e:
+        start_idx = text.find("{")
+        end_idx = text.rfind("}")
+        if start_idx != -1 and end_idx != -1:
+            try:
+                return json.loads(text[start_idx:end_idx+1])
+            except Exception:
+                pass
+        raise e
+
 # ----------------- SIDEBAR -----------------
 st.sidebar.markdown("# 🛠️ Configuration")
 st.sidebar.markdown("---")
@@ -218,12 +240,34 @@ else:
         type="password",
         placeholder="sk-..."
     )
-    
+# Rendering Engine Selection (Visible for both Gemini and OpenAI)
+st.sidebar.markdown("---")
+rendering_engine = st.sidebar.selectbox(
+    "3D Rendering Engine",
+    ["Default AI Renderer (Imagen / DALL-E 3)", "Stable Diffusion + ControlNet (Replicate API)"],
+    help="Default uses Gemini's Imagen or OpenAI's DALL-E 3. ControlNet enforces the exact room shapes of your uploaded 2D blueprint."
+)
+
+replicate_api_token = ""
+if rendering_engine == "Stable Diffusion + ControlNet (Replicate API)":
+    replicate_api_token = st.sidebar.text_input(
+        "Replicate API Token",
+        value=os.getenv("REPLICATE_API_TOKEN") or "",
+        type="password",
+        placeholder="r8_..."
+    )
+
+if api_provider == "OpenAI / OpenRouter":
     # Advanced Settings for Custom Base URL
     with st.sidebar.expander("⚙️ Advanced API Settings"):
         default_base_url = "https://api.openai.com/v1"
+        default_chat_model = "gpt-4o"
+        default_img_model = "dall-e-3"
         if api_key.startswith("sk-or-"):
             default_base_url = "https://openrouter.ai/api/v1"
+            default_chat_model = "openai/gpt-4o"
+            default_img_model = "openai/dall-e-3"
+            
         base_url = st.text_input(
             "API Base URL",
             value=default_base_url,
@@ -232,13 +276,13 @@ else:
         
         openai_model = st.text_input(
             "OpenAI Chat Model",
-            value="gpt-4o",
+            value=default_chat_model,
             help="The vision model used to analyze the 2D layout."
         )
         
         openai_image_model = st.text_input(
             "OpenAI Image Model",
-            value="dall-e-3",
+            value=default_img_model,
             help="The image generator model."
         )
 
@@ -382,10 +426,9 @@ with col2:
                 {floor_info_str}
                 
                 Analyze each floor plan in relation to the others. Describe the overall architectural structure, room distributions, wall alignments, door/window openings, and layout details in depth.
-                Then, write a highly descriptive, detailed prompt for a high-quality 3D architectural rendering engine.
-                The prompt should guide the image generator to create a photorealistic, stunning 3D architectural visualization of the exterior/interior or a 3D cutaway floor plan of the property.
-                Include styles like: "modern architecture", "photorealistic", "luxurious design", "architectural photography", "octane render", "high-end finish".
-                Ensure the prompt focuses on making the 3D visualization look premium and clean.
+                Then, write a highly descriptive, detailed prompt for DALL-E 3 or Stable Diffusion to generate an isometric 3D floor plan render of the property based on the analyzed layout structure.
+                Include styles like: "isometric 3D floor plan render", "modern architecture", "photorealistic", "luxurious design", "architectural photography", "octane render", "high-end finish".
+                Ensure the prompt focuses on making the 3D visualization look premium, clean, and accurately reflects the rooms and walls analyzed.
                 
                 Format your response as a JSON object with two keys:
                 "description": "Your detailed analysis of the floor plan(s)",
@@ -393,6 +436,7 @@ with col2:
                 """
                 
                 # ----------------- GOOGLE GEMINI FLOW -----------------
+                # --- STEP 1: VISION LAYOUT ANALYSIS ---
                 if api_provider == "Google Gemini":
                     try:
                         from google import genai
@@ -400,78 +444,47 @@ with col2:
                         
                         with st.spinner(f"🔍 Step 1/2: Gemini analyzing the {len(st.session_state.preview_images)} 2D layout drawings..."):
                             client = genai.Client(api_key=api_key)
-                            
-                            # Pack all preview images as Parts for Gemini Multimodal input
                             contents = []
                             for _, img in st.session_state.preview_images:
                                 img_bytes = get_image_bytes(img)
-                                contents.append(
-                                    types.Part.from_bytes(
-                                        data=img_bytes,
-                                        mime_type="image/png"
-                                    )
-                                )
-                            # Append the text prompt
+                                contents.append(types.Part.from_bytes(data=img_bytes, mime_type="image/png"))
                             contents.append(vision_prompt)
                             
                             try:
                                 response = client.models.generate_content(
                                     model='gemini-3.5-flash',
                                     contents=contents,
-                                    config=types.GenerateContentConfig(
-                                        response_mime_type="application/json"
-                                    )
+                                    config=types.GenerateContentConfig(response_mime_type="application/json")
                                 )
-                            except Exception as e:
+                            except Exception:
                                 response = client.models.generate_content(
                                     model='gemini-2.0-flash',
                                     contents=contents,
-                                    config=types.GenerateContentConfig(
-                                        response_mime_type="application/json"
-                                    )
+                                    config=types.GenerateContentConfig(response_mime_type="application/json")
                                 )
                             
-                            # Parse JSON results
-                            result_data = json.loads(response.text)
+                            result_data = clean_json_response(response.text)
                             st.session_state.description = result_data.get("description", "")
                             st.session_state.refined_prompt = result_data.get("rendering_prompt", "")
-                        
-                        with st.spinner("🎨 Step 2/2: Imagen rendering the 3D visualization..."):
-                            image_response = client.models.generate_content(
-                                model='gemini-3.1-flash-image',
-                                contents=st.session_state.refined_prompt,
-                                config=types.GenerateContentConfig(
-                                    response_modalities=["IMAGE"]
-                                )
-                            )
-                            
-                            generated_image_bytes = None
-                            for part in image_response.candidates[0].content.parts:
-                                if part.inline_data:
-                                    generated_image_bytes = part.inline_data.data
-                                    break
-                                    
-                            if generated_image_bytes is None:
-                                raise ValueError("No image data returned from the generation model.")
-                                
-                            st.session_state.generated_image = generated_image_bytes
-                            st.success("✨ 3D Render generated successfully!")
-                            
                     except Exception as e:
-                        st.error(f"❌ Gemini Generation failed: {e}")
-                        st.info("Tip: Double-check your Gemini API key and ensure it has access to the standard Google GenAI models.")
-                
-                # ----------------- OPENAI FLOW -----------------
+                        st.error(f"❌ Gemini Vision Analysis failed: {e}")
+                        st.stop()
                 else:
                     try:
                         import openai
                         
                         with st.spinner(f"🔍 Step 1/2: GPT-4o analyzing the {len(st.session_state.preview_images)} 2D layout drawings..."):
-                            # Build client
-                            client = openai.OpenAI(api_key=api_key, base_url=base_url)
+                            # Build client with OpenRouter compatibility headers
+                            client = openai.OpenAI(
+                                api_key=api_key, 
+                                base_url=base_url,
+                                default_headers={
+                                    "HTTP-Referer": "http://localhost:8501",
+                                    "X-Title": "Architect3D"
+                                }
+                            )
                             
                             content_parts = [{"type": "text", "text": vision_prompt}]
-                            # Append all images as base64 blocks
                             for _, img in st.session_state.preview_images:
                                 img_bytes = get_image_bytes(img)
                                 base64_image = base64.b64encode(img_bytes).decode('utf-8')
@@ -482,12 +495,7 @@ with col2:
                                     }
                                 })
                             
-                            openai_messages = [
-                                {
-                                    "role": "user",
-                                    "content": content_parts
-                                }
-                            ]
+                            openai_messages = [{"role": "user", "content": content_parts}]
                             
                             response = client.chat.completions.create(
                                 model=openai_model,
@@ -495,25 +503,107 @@ with col2:
                                 response_format={"type": "json_object"}
                             )
                             
-                            result_data = json.loads(response.choices[0].message.content)
+                            result_data = clean_json_response(response.choices[0].message.content)
                             st.session_state.description = result_data.get("description", "")
                             st.session_state.refined_prompt = result_data.get("rendering_prompt", "")
-                            
-                        with st.spinner("🎨 Step 2/2: Generating image via DALL-E 3..."):
-                            image_response = client.images.generate(
-                                model=openai_image_model,
-                                prompt=st.session_state.refined_prompt,
-                                size="1024x1024",
-                                quality="standard",
-                                n=1
-                            )
-                            img_url = image_response.data[0].url
-                            st.session_state.generated_image = requests.get(img_url).content
-                            st.success("✨ 3D Render generated successfully!")
-                            
                     except Exception as e:
-                        st.error(f"❌ OpenAI Generation failed: {e}")
-                        st.info("Tip: Double-check your API Key, base URL, and model configurations.")
+                        st.error(f"❌ OpenAI Vision Analysis failed: {e}")
+                        st.stop()
+
+                # --- STEP 2: IMAGE GENERATION ---
+                if rendering_engine == "Stable Diffusion + ControlNet (Replicate API)":
+                    try:
+                        with st.spinner("🎨 Step 2/2: Rendering exact room shapes via Stable Diffusion + ControlNet (Replicate)..."):
+                            if not replicate_api_token:
+                                raise ValueError("🔑 Please enter your Replicate API Token in the sidebar to use ControlNet.")
+                            
+                            import replicate
+                            import tempfile
+                            
+                            replicate_client = replicate.Client(api_token=replicate_api_token)
+                            
+                            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+                                first_img = st.session_state.preview_images[0][1]
+                                first_img.save(temp_file, format="PNG")
+                                temp_path = temp_file.name
+                            
+                            try:
+                                with open(temp_path, "rb") as image_file:
+                                    output = replicate_client.run(
+                                        "jagilley/controlnet-canny:aff48af9c68d162388d230a2ab003f68d2638d88307bdaf1c2f1ac95079c9613",
+                                        input={
+                                            "image": image_file,
+                                            "prompt": st.session_state.refined_prompt,
+                                            "a_prompt": "isometric 3D floor plan render, photorealistic, 3d render, architectural rendering, extremely detailed, best quality",
+                                            "n_prompt": "lowres, bad quality, blurry, distorted rooms, wrong scale",
+                                            "image_resolution": "768"
+                                        }
+                                    )
+                                    
+                                if output and isinstance(output, list) and len(output) > 0:
+                                    st.session_state.generated_image = requests.get(output[0]).content
+                                    st.success("✨ 3D Render generated successfully via ControlNet!")
+                                else:
+                                    raise ValueError("No image URLs returned from Replicate ControlNet.")
+                            finally:
+                                try:
+                                    os.unlink(temp_path)
+                                except:
+                                    pass
+                    except Exception as e:
+                        st.error(f"❌ ControlNet Generation failed: {e}")
+                else:
+                    # Default AI Renderer
+                    if api_provider == "Google Gemini":
+                        try:
+                            from google import genai
+                            from google.genai import types
+                            client = genai.Client(api_key=api_key)
+                            with st.spinner("🎨 Step 2/2: Imagen rendering the 3D visualization..."):
+                                image_response = client.models.generate_content(
+                                    model='gemini-3.1-flash-image',
+                                    contents=st.session_state.refined_prompt,
+                                    config=types.GenerateContentConfig(response_modalities=["IMAGE"])
+                                )
+                                
+                                generated_image_bytes = None
+                                for part in image_response.candidates[0].content.parts:
+                                    if part.inline_data:
+                                        generated_image_bytes = part.inline_data.data
+                                        break
+                                        
+                                if generated_image_bytes is None:
+                                    raise ValueError("No image data returned from the generation model.")
+                                    
+                                st.session_state.generated_image = generated_image_bytes
+                                st.success("✨ 3D Render generated successfully!")
+                        except Exception as e:
+                            st.error(f"❌ Gemini Image Generation failed: {e}")
+                    else:
+                        try:
+                            import openai
+                            # Build client with OpenRouter compatibility headers
+                            client = openai.OpenAI(
+                                api_key=api_key, 
+                                base_url=base_url,
+                                default_headers={
+                                    "HTTP-Referer": "http://localhost:8501",
+                                    "X-Title": "Architect3D"
+                                }
+                            )
+                            with st.spinner("🎨 Step 2/2: Generating image via DALL-E 3..."):
+                                image_response = client.images.generate(
+                                    model=openai_image_model,
+                                    prompt=st.session_state.refined_prompt,
+                                    size="1024x1024",
+                                    quality="standard",
+                                    n=1
+                                )
+                                img_url = image_response.data[0].url
+                                st.session_state.generated_image = requests.get(img_url).content
+                                st.success("✨ 3D Render generated successfully!")
+                        except Exception as e:
+                            st.error(f"❌ OpenAI Image Generation failed: {e}")
 
     # ----------------- DISPLAY GENERATED OUTPUT -----------------
     if st.session_state.generated_image is not None:
