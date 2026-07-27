@@ -375,136 +375,136 @@ with col2:
                     floor_descriptions.append(f"Image {idx+1} is the {floor_name} layout plan.")
                 floor_info_str = "\n".join(floor_descriptions)
             
-            vision_prompt = f"""
-            You are an expert architectural designer. Analyze the attached 2D floor plan layout drawings.
-            The user wants to visualize this property as a {property_type} with dimensions {dimensions}.
-            There are {len(st.session_state.preview_images)} drawings uploaded:
-            {floor_info_str}
-            
-            Analyze each floor plan in relation to the others. Describe the overall architectural structure, room distributions, wall alignments, door/window openings, and layout details in depth.
-            Then, write a highly descriptive, detailed prompt for a high-quality 3D architectural rendering engine.
-            The prompt should guide the image generator to create a photorealistic, stunning 3D architectural visualization of the exterior/interior or a 3D cutaway floor plan of the property.
-            Include styles like: "modern architecture", "photorealistic", "luxurious design", "architectural photography", "octane render", "high-end finish".
-            Ensure the prompt focuses on making the 3D visualization look premium and clean.
-            
-            Format your response as a JSON object with two keys:
-            "description": "Your detailed analysis of the floor plan(s)",
-            "rendering_prompt": "The detailed prompt for the image generator"
-            """
-            
-            # ----------------- GOOGLE GEMINI FLOW -----------------
-            if api_provider == "Google Gemini":
-                try:
-                    from google import genai
-                    from google.genai import types
-                    
-                    with st.spinner(f"🔍 Step 1/2: Gemini analyzing the {len(st.session_state.preview_images)} 2D layout drawings..."):
-                        client = genai.Client(api_key=api_key)
+                vision_prompt = f"""
+                You are an expert architectural designer. Analyze the attached 2D floor plan layout drawings.
+                The user wants to visualize this property as a {property_type} with dimensions {dimensions}.
+                There are {len(st.session_state.preview_images)} drawings uploaded:
+                {floor_info_str}
+                
+                Analyze each floor plan in relation to the others. Describe the overall architectural structure, room distributions, wall alignments, door/window openings, and layout details in depth.
+                Then, write a highly descriptive, detailed prompt for a high-quality 3D architectural rendering engine.
+                The prompt should guide the image generator to create a photorealistic, stunning 3D architectural visualization of the exterior/interior or a 3D cutaway floor plan of the property.
+                Include styles like: "modern architecture", "photorealistic", "luxurious design", "architectural photography", "octane render", "high-end finish".
+                Ensure the prompt focuses on making the 3D visualization look premium and clean.
+                
+                Format your response as a JSON object with two keys:
+                "description": "Your detailed analysis of the floor plan(s)",
+                "rendering_prompt": "The detailed prompt for the image generator"
+                """
+                
+                # ----------------- GOOGLE GEMINI FLOW -----------------
+                if api_provider == "Google Gemini":
+                    try:
+                        from google import genai
+                        from google.genai import types
                         
-                        # Pack all preview images as Parts for Gemini Multimodal input
-                        contents = []
-                        for _, img in st.session_state.preview_images:
-                            img_bytes = get_image_bytes(img)
-                            contents.append(
-                                types.Part.from_bytes(
-                                    data=img_bytes,
-                                    mime_type="image/png"
+                        with st.spinner(f"🔍 Step 1/2: Gemini analyzing the {len(st.session_state.preview_images)} 2D layout drawings..."):
+                            client = genai.Client(api_key=api_key)
+                            
+                            # Pack all preview images as Parts for Gemini Multimodal input
+                            contents = []
+                            for _, img in st.session_state.preview_images:
+                                img_bytes = get_image_bytes(img)
+                                contents.append(
+                                    types.Part.from_bytes(
+                                        data=img_bytes,
+                                        mime_type="image/png"
+                                    )
+                                )
+                            # Append the text prompt
+                            contents.append(vision_prompt)
+                            
+                            response = client.models.generate_content(
+                                model='gemini-3.5-flash',
+                                contents=contents,
+                                config=types.GenerateContentConfig(
+                                    response_mime_type="application/json"
                                 )
                             )
-                        # Append the text prompt
-                        contents.append(vision_prompt)
-                        
-                        response = client.models.generate_content(
-                            model='gemini-3.5-flash',
-                            contents=contents,
-                            config=types.GenerateContentConfig(
-                                response_mime_type="application/json"
-                            )
-                        )
-                        
-                        # Parse JSON results
-                        result_data = json.loads(response.text)
-                        st.session_state.description = result_data.get("description", "")
-                        st.session_state.refined_prompt = result_data.get("rendering_prompt", "")
-                    
-                    with st.spinner("🎨 Step 2/2: Imagen rendering the 3D visualization..."):
-                        image_response = client.models.generate_content(
-                            model='gemini-3.1-flash-image',
-                            contents=st.session_state.refined_prompt,
-                            config=types.GenerateContentConfig(
-                                response_modalities=["IMAGE"]
-                            )
-                        )
-                        
-                        generated_image_bytes = None
-                        for part in image_response.candidates[0].content.parts:
-                            if part.inline_data:
-                                generated_image_bytes = part.inline_data.data
-                                break
-                                
-                        if generated_image_bytes is None:
-                            raise ValueError("No image data returned from the generation model.")
                             
-                        st.session_state.generated_image = generated_image_bytes
-                        st.success("✨ 3D Render generated successfully!")
+                            # Parse JSON results
+                            result_data = json.loads(response.text)
+                            st.session_state.description = result_data.get("description", "")
+                            st.session_state.refined_prompt = result_data.get("rendering_prompt", "")
                         
-                except Exception as e:
-                    st.error(f"❌ Gemini Generation failed: {e}")
-                    st.info("Tip: Double-check your Gemini API key and ensure it has access to the standard Google GenAI models.")
-            
-            # ----------------- OPENAI FLOW -----------------
-            else:
-                try:
-                    import openai
-                    
-                    with st.spinner(f"🔍 Step 1/2: GPT-4o analyzing the {len(st.session_state.preview_images)} 2D layout drawings..."):
-                        # Build client
-                        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+                        with st.spinner("🎨 Step 2/2: Imagen rendering the 3D visualization..."):
+                            image_response = client.models.generate_content(
+                                model='gemini-3.1-flash-image',
+                                contents=st.session_state.refined_prompt,
+                                config=types.GenerateContentConfig(
+                                    response_modalities=["IMAGE"]
+                                )
+                            )
+                            
+                            generated_image_bytes = None
+                            for part in image_response.candidates[0].content.parts:
+                                if part.inline_data:
+                                    generated_image_bytes = part.inline_data.data
+                                    break
+                                    
+                            if generated_image_bytes is None:
+                                raise ValueError("No image data returned from the generation model.")
+                                
+                            st.session_state.generated_image = generated_image_bytes
+                            st.success("✨ 3D Render generated successfully!")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Gemini Generation failed: {e}")
+                        st.info("Tip: Double-check your Gemini API key and ensure it has access to the standard Google GenAI models.")
+                
+                # ----------------- OPENAI FLOW -----------------
+                else:
+                    try:
+                        import openai
                         
-                        content_parts = [{"type": "text", "text": vision_prompt}]
-                        # Append all images as base64 blocks
-                        for _, img in st.session_state.preview_images:
-                            img_bytes = get_image_bytes(img)
-                            base64_image = base64.b64encode(img_bytes).decode('utf-8')
-                            content_parts.append({
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{base64_image}"
+                        with st.spinner(f"🔍 Step 1/2: GPT-4o analyzing the {len(st.session_state.preview_images)} 2D layout drawings..."):
+                            # Build client
+                            client = openai.OpenAI(api_key=api_key, base_url=base_url)
+                            
+                            content_parts = [{"type": "text", "text": vision_prompt}]
+                            # Append all images as base64 blocks
+                            for _, img in st.session_state.preview_images:
+                                img_bytes = get_image_bytes(img)
+                                base64_image = base64.b64encode(img_bytes).decode('utf-8')
+                                content_parts.append({
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/png;base64,{base64_image}"
+                                    }
+                                })
+                            
+                            openai_messages = [
+                                {
+                                    "role": "user",
+                                    "content": content_parts
                                 }
-                            })
-                        
-                        openai_messages = [
-                            {
-                                "role": "user",
-                                "content": content_parts
-                            }
-                        ]
-                        
-                        response = client.chat.completions.create(
-                            model=openai_model,
-                            messages=openai_messages,
-                            response_format={"type": "json_object"}
-                        )
-                        
-                        result_data = json.loads(response.choices[0].message.content)
-                        st.session_state.description = result_data.get("description", "")
-                        st.session_state.refined_prompt = result_data.get("rendering_prompt", "")
-                        
-                    with st.spinner("🎨 Step 2/2: Generating image via DALL-E 3..."):
-                        image_response = client.images.generate(
-                            model=openai_image_model,
-                            prompt=st.session_state.refined_prompt,
-                            size="1024x1024",
-                            quality="standard",
-                            n=1
-                        )
-                        img_url = image_response.data[0].url
-                        st.session_state.generated_image = requests.get(img_url).content
-                        st.success("✨ 3D Render generated successfully!")
-                        
-                except Exception as e:
-                    st.error(f"❌ OpenAI Generation failed: {e}")
-                    st.info("Tip: Double-check your API Key, base URL, and model configurations.")
+                            ]
+                            
+                            response = client.chat.completions.create(
+                                model=openai_model,
+                                messages=openai_messages,
+                                response_format={"type": "json_object"}
+                            )
+                            
+                            result_data = json.loads(response.choices[0].message.content)
+                            st.session_state.description = result_data.get("description", "")
+                            st.session_state.refined_prompt = result_data.get("rendering_prompt", "")
+                            
+                        with st.spinner("🎨 Step 2/2: Generating image via DALL-E 3..."):
+                            image_response = client.images.generate(
+                                model=openai_image_model,
+                                prompt=st.session_state.refined_prompt,
+                                size="1024x1024",
+                                quality="standard",
+                                n=1
+                            )
+                            img_url = image_response.data[0].url
+                            st.session_state.generated_image = requests.get(img_url).content
+                            st.success("✨ 3D Render generated successfully!")
+                            
+                    except Exception as e:
+                        st.error(f"❌ OpenAI Generation failed: {e}")
+                        st.info("Tip: Double-check your API Key, base URL, and model configurations.")
 
     # ----------------- DISPLAY GENERATED OUTPUT -----------------
     if st.session_state.generated_image is not None:
