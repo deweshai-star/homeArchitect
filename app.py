@@ -414,13 +414,22 @@ with col2:
                             # Append the text prompt
                             contents.append(vision_prompt)
                             
-                            response = client.models.generate_content(
-                                model='gemini-1.5-flash',
-                                contents=contents,
-                                config=types.GenerateContentConfig(
-                                    response_mime_type="application/json"
+                            try:
+                                response = client.models.generate_content(
+                                    model='gemini-3.5-flash',
+                                    contents=contents,
+                                    config=types.GenerateContentConfig(
+                                        response_mime_type="application/json"
+                                    )
                                 )
-                            )
+                            except Exception as e:
+                                response = client.models.generate_content(
+                                    model='gemini-2.0-flash',
+                                    contents=contents,
+                                    config=types.GenerateContentConfig(
+                                        response_mime_type="application/json"
+                                    )
+                                )
                             
                             # Parse JSON results
                             result_data = json.loads(response.text)
