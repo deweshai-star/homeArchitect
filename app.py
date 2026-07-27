@@ -395,17 +395,25 @@ with col2:
                         st.session_state.description = result_data.get("description", "")
                         st.session_state.refined_prompt = result_data.get("rendering_prompt", "")
                     
-                    with st.spinner("🎨 Step 2/2: Imagen 3 rendering the 3D visualization..."):
-                        image_response = client.models.generate_images(
-                            model='imagen-3.0-generate-002',
-                            prompt=st.session_state.refined_prompt,
-                            config=types.GenerateImagesConfig(
-                                number_of_images=1,
-                                output_mime_type='image/png',
-                                aspect_ratio="1:1"
+                    with st.spinner("🎨 Step 2/2: Imagen rendering the 3D visualization..."):
+                        image_response = client.models.generate_content(
+                            model='gemini-3.1-flash-image',
+                            contents=st.session_state.refined_prompt,
+                            config=types.GenerateContentConfig(
+                                response_modalities=["IMAGE"]
                             )
                         )
-                        st.session_state.generated_image = image_response.generated_images[0].image.image_bytes
+                        
+                        generated_image_bytes = None
+                        for part in image_response.candidates[0].content.parts:
+                            if part.inline_data:
+                                generated_image_bytes = part.inline_data.data
+                                break
+                                
+                        if generated_image_bytes is None:
+                            raise ValueError("No image data returned from the generation model.")
+                            
+                        st.session_state.generated_image = generated_image_bytes
                         st.success("✨ 3D Render generated successfully!")
                         
                 except Exception as e:
