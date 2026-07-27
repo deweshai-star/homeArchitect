@@ -425,14 +425,16 @@ with col2:
                 There are {len(st.session_state.preview_images)} drawings uploaded:
                 {floor_info_str}
                 
-                Analyze each floor plan in relation to the others. Describe the overall architectural structure, room distributions, wall alignments, door/window openings, and layout details in depth.
-                Then, write a highly descriptive, detailed prompt for DALL-E 3 or Stable Diffusion to generate an isometric 3D floor plan render of the property based on the analyzed layout structure.
-                Include styles like: "isometric 3D floor plan render", "modern architecture", "photorealistic", "luxurious design", "architectural photography", "octane render", "high-end finish".
-                Ensure the prompt focuses on making the 3D visualization look premium, clean, and accurately reflects the rooms and walls analyzed.
+                Analyze each floor plan in relation to the others. Keep your analysis description under 2 sentences.
+                Write a concise prompt (under 2 sentences) for DALL-E 3 or Stable Diffusion to generate an isometric 3D floor plan render of the property based on the analyzed layout structure.
+                Include key styles: "isometric 3D floor plan render", "modern architecture", "photorealistic", "luxurious design", "architectural photography", "octane render".
+                Ensure the prompt focuses on making the 3D visualization look premium and clean.
+                
+                CRITICAL: Keep your output extremely brief and concise. The entire output must be under 150 tokens.
                 
                 Format your response as a JSON object with two keys:
-                "description": "Your detailed analysis of the floor plan(s)",
-                "rendering_prompt": "The detailed prompt for the image generator"
+                "description": "Your brief analysis of the floor plan(s)",
+                "rendering_prompt": "The brief prompt for the image generator"
                 """
                 
                 # ----------------- GOOGLE GEMINI FLOW -----------------
