@@ -186,6 +186,13 @@ def get_image_bytes(image):
 st.sidebar.markdown("# 🛠️ Configuration")
 st.sidebar.markdown("---")
 
+# Demo Mode Toggle
+demo_mode = st.sidebar.checkbox(
+    "Demo Mode (No API keys required)",
+    value=False,
+    help="Enable this to simulate the 3D rendering flow using pre-cached premium architectural mockups."
+)
+
 # API Provider Selection
 api_provider = st.sidebar.selectbox(
     "AI Provider",
@@ -332,16 +339,41 @@ with col2:
     
     # Handle AI Processing
     if generate_btn:
-        if not api_key:
+        if not demo_mode and not api_key:
             st.error("🔑 Please enter your API Key in the sidebar to proceed.")
         elif not st.session_state.preview_images:
             st.error("📐 Please upload at least one 2D floor plan file.")
         else:
-            # Construct vision prompt describing the upload layout structure
-            floor_descriptions = []
-            for idx, (floor_name, _) in enumerate(st.session_state.preview_images):
-                floor_descriptions.append(f"Image {idx+1} is the {floor_name} layout plan.")
-            floor_info_str = "\n".join(floor_descriptions)
+            if demo_mode:
+                import time
+                with st.spinner("🔍 Step 1/2: Simulating 2D floor plan vision analysis..."):
+                    time.sleep(1.5)
+                    st.session_state.description = (
+                        f"Simulated Analysis of the uploaded 2D {property_type} floor plan(s) at dimensions {dimensions}. "
+                        "The layout structures show consistent room sizing, aligned doorways, and window frame positioning. "
+                        "Volumetric parameters are validated."
+                    )
+                    st.session_state.refined_prompt = (
+                        f"A photorealistic, highly detailed 3D architectural rendering of a modern {property_type.lower()}, "
+                        f"dimensions {dimensions}. Featuring luxury styling, premium materials, warm lights, octane render, "
+                        "architectural photography style."
+                    )
+                with st.spinner("🎨 Step 2/2: Rendering photorealistic 3D visualization (Simulated)..."):
+                    time.sleep(1.5)
+                    # Load from mock file
+                    mock_filename = "mock_villa_render.png" if property_type == "Villa" else "mock_flat_render.png"
+                    try:
+                        with open(mock_filename, "rb") as f:
+                            st.session_state.generated_image = f.read()
+                        st.success("✨ 3D Render simulated successfully!")
+                    except Exception as e:
+                        st.error(f"Failed to load local mock image: {e}")
+            else:
+                # Construct vision prompt describing the upload layout structure
+                floor_descriptions = []
+                for idx, (floor_name, _) in enumerate(st.session_state.preview_images):
+                    floor_descriptions.append(f"Image {idx+1} is the {floor_name} layout plan.")
+                floor_info_str = "\n".join(floor_descriptions)
             
             vision_prompt = f"""
             You are an expert architectural designer. Analyze the attached 2D floor plan layout drawings.
